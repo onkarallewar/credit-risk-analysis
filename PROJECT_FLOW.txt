@@ -1,0 +1,134 @@
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+    CREDIT CARD DEFAULT — COMPLETE PROJECT FLOW (simple, in order)
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+
+GOAL: Predict if a credit card customer will miss next month's payment
+      (a Probability-of-Default / PD model), then turn it into risk tiers
+      and an expected-loss dashboard.
+
+The whole thing runs in this order. Each step feeds the next.
+
+
+STEP 1 ─ GET THE DATA
+─────────────────────
+• Dataset: UCI "Default of Credit Card Clients" (Taiwan), 30,000 customers.
+• One CSV, sitting in  data/raw/UCI_Credit_Card.csv
+• Each row = one customer: credit limit, age, education, 6 months of
+  payment history, 6 months of bills, and whether they defaulted (0/1).
+
+
+STEP 2 ─ SQL (explore the data before modelling)   → src/sql_layer.py
+────────────────────────────────────────────────
+• Load the CSV into a SQL database (SQLite).
+• Write simple SQL queries to understand risk:
+    - overall default rate (22%)
+    - default rate by credit-limit band  (low limits = riskier)
+    - default rate by last repayment status (late = much riskier)
+    - isolate a high-risk segment with a WHERE clause
+• This is the "analyst first looks at the data" stage. SQL for the data
+  layer, Python for everything after.
+
+
+STEP 3 ─ EDA (understand the patterns)
+──────────────────────────────────────
+• Check shape (30,000 × 24) and missing values (there are none).
+• Check the target balance → 22% default, 78% no default (imbalanced).
+• Look at which features separate defaulters from non-defaulters
+  → payment delays and utilization stand out.
+• This tells us what to clean and what to engineer next.
+
+
+STEP 4 ─ DATA CLEANING                              → inside src/analyze.py
+───────────────────────
+• Rename the odd column  PAY_0  →  PAY_1  (source file quirk).
+• Rename the target column to  DEFAULT.
+• Fix bad category codes:
+    - EDUCATION had undocumented 0, 5, 6  →  merged into 4 ("others").
+    - MARRIAGE had a stray 0             →  merged into 3 ("others").
+• Drop the ID column (just a row number, no predictive value).
+
+
+STEP 5 ─ FEATURE ENGINEERING                        → inside src/analyze.py
+────────────────────────────
+• Keep the 23 raw features, then ADD 3 summary features:
+    - AVG_UTILIZATION = average bill ÷ credit limit   (how maxed-out)
+    - TOTAL_DELAY     = total months late over 6 months (chronic lateness)
+    - PAY_TO_BILL     = payments ÷ bills               (how much they repay)
+• These compress noisy, correlated columns into clean risk signals.
+• Result: 26 features total.
+
+
+STEP 6 ─ PREPROCESSING (get data model-ready)       → inside src/analyze.py
+─────────────────────────────────────────────
+• Split into 80% train / 20% test, STRATIFIED (keeps 22% default in both).
+• Scale features with StandardScaler — FIT ON TRAIN ONLY (avoids leakage).
+• Handle the 22% imbalance:
+    - linear model: class_weight = "balanced"
+    - XGBoost: scale_pos_weight = ratio of non-defaulters to defaulters
+
+
+STEP 7 ─ MODELLING (train + compare)                → src/analyze.py
+──────────────────────────────────────
+• Train 3 models:
+    1. Logistic Regression  (interpretable baseline / scorecard style)
+    2. Random Forest        (non-linear challenger)
+    3. XGBoost              (high-performance model)  ← WINNER
+• Compare on accuracy, precision, recall, F1, ROC-AUC.
+• XGBoost wins:  ROC-AUC 0.78 (Gini 0.56), recall 63%.
+
+
+STEP 8 ─ EXPLAINABILITY with SHAP                   → src/analyze.py
+──────────────────────────────────────
+• Run SHAP on the XGBoost model to see WHY it predicts default.
+• Top drivers: TOTAL_DELAY, latest repayment status, utilization.
+• Gives "reason codes" — needed to explain a decision in credit/lending.
+• Chart saved:  reports/shap_drivers.png
+
+
+STEP 9 ─ RISK TIERS (segment the portfolio)         → src/analyze.py
+──────────────────────────────────────────────
+• Score all 30,000 customers with their PD (default probability).
+• Split into 4 tiers by PD:  Low / Medium / High / Critical.
+• Actual default rate climbs cleanly:  5% → 24% → 54% → 84%.
+• Top 20% of accounts contain 56% of all real defaulters.
+• Chart saved:  reports/risk_tiers.png
+
+
+STEP 10 ─ EXPECTED LOSS ($ impact)                  → src/analyze.py
+─────────────────────────────────────
+• For each customer:  Expected Loss = PD × Exposure (outstanding balance).
+• Total ≈ US$18M expected loss across the portfolio.
+• Ties the model to a business number (like "revenue at risk").
+
+
+STEP 11 ─ POWER BI DASHBOARD                        → src/export_powerbi.py
+──────────────────────────────
+• Export one row per customer (PD, tier, exposure, expected loss)
+  to  reports/portfolio_scored.csv
+• Open Power BI → Get Data → Text/CSV → load that file.
+• Build simple visuals:
+    - Cards: total customers, total expected loss, overall default rate
+    - Bar chart: expected loss by risk tier
+    - Bar chart: default rate by credit band
+    - Table: top 15% highest-PD customers to monitor
+• This is the final deliverable a risk team would actually look at.
+
+
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+  ONE-LINE SUMMARY OF THE FLOW:
+  Data → SQL explore → EDA → clean → engineer → preprocess →
+  train 3 models (XGBoost wins) → SHAP explain → risk tiers →
+  expected loss → Power BI dashboard.
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+
+HOW TO RUN EVERYTHING:
+  pip install -r requirements.txt
+  python src/sql_layer.py        (SQL exploration)
+  python src/analyze.py          (clean, engineer, train, SHAP, tiers, loss)
+  python src/export_powerbi.py   (make the Power BI file)
+  → then load reports/portfolio_scored.csv into Power BI.
+
+TOOLS USED:  Python, SQL, scikit-learn, XGBoost, SHAP, Power BI.
+
+NOTE: SQL here uses SQLite (a simple file database). The queries are standard
+SQL and work the same in MySQL — if asked, just say you used SQLite locally.
